@@ -12,10 +12,7 @@ import org.slf4j.LoggerFactory;
  * @data: 2021/4/20 20:17
  */
 public class PostponeTask implements Runnable {
-    /**
-     * 锁名
-     */
-    private String key;
+
     /**
      * 锁名所对应的值
      */
@@ -28,8 +25,7 @@ public class PostponeTask implements Runnable {
     private DistributedLock distributedLock;
     Logger logger = LoggerFactory.getLogger(PostponeTask.class);
 
-    public PostponeTask(String key, String value, long expireTime, DistributedLock distributedLock, Postpone postPone) {
-        this.key = key;
+    public PostponeTask(String value, long expireTime, DistributedLock distributedLock, Postpone postPone) {
         this.value = value;
         this.expireTime = expireTime;
         this.distributedLock = distributedLock;
@@ -44,7 +40,7 @@ public class PostponeTask implements Runnable {
             try {
                 Thread.sleep(waitTime);
                 //延时成功
-                if (distributedLock.postpone(key, value, expireTime)) {
+                if (distributedLock.postpone(expireTime)) {
                     if (logger.isDebugEnabled()) {
                         logger.debug(value + "延期成功");
                     }

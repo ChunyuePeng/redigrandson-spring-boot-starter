@@ -1,6 +1,7 @@
 package com.pcy.redigrandson.config;
 
 import com.pcy.redigrandson.DistributedLock;
+import com.pcy.redigrandson.Redigrandson;
 import com.pcy.redigrandson.properties.RedigradsonProperties;
 import com.pcy.redigrandson.properties.RedisConnectionInfo;
 import com.pcy.redigrandson.redislock.RedisDistributedLock;
@@ -31,7 +32,7 @@ public class RedigrandsonConfig {
     }
 
     @Bean
-    public DistributedLock distributedLock(){
-        return new RedisDistributedLock();
+    public Redigrandson redigrandson(){
+        return new Redigrandson();
     }
 }
