@@ -39,6 +39,9 @@ public class PostponeTask implements Runnable {
         while (!postPone.needStopPostPone()) {
             try {
                 Thread.sleep(waitTime);
+                if (postPone.needStopPostPone()) {
+                    break;
+                }
                 //延时成功
                 if (distributedLock.postpone(expireTime)) {
                     if (logger.isDebugEnabled()) {

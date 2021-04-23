@@ -63,7 +63,7 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
     public RedisDistributedLock(String sourceName) {
         this.sourceName = sourceName;
         try {
-            this.uniqueStr = MACUtil.getLocalMac() + "-" + JVMUtil.jvmPid() + "-" + Thread.currentThread();
+            this.uniqueStr = MACUtil.getLocalMac() + "-" + JVMUtil.jvmPid() + "-" + Thread.currentThread().getId();
         } catch (SocketException e) {
             e.printStackTrace();
         } catch (UnknownHostException e) {
@@ -92,6 +92,12 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
                     "return redis.call('pexpire', KEYS[1], ARGV[2]) " +
                     "else return 0 " +
                     "end";
+    public static final String POSTPONE_REENTRANT_LOCK_SCRIPT =
+            "if (redis.call('hexists', KEYS[1], ARGV[2]) == 1) then\n" +
+                    "    redis.call('pexpire', KEYS[1], ARGV[1]);\n" +
+                    "    return 1;\n" +
+                    "end;\n" +
+                    "return 0;\n";
 
     /**
      * 可重入加锁脚本，KEYS[1]：锁名字，ARGS[1]过期时间，ARGS[2]：加锁时的唯一标识
@@ -169,7 +175,6 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
                 if (logger.isDebugEnabled()) {
                     logger.debug(uniqueStr + "获取到了锁");
                 }
-
                 break;
             }
         }
@@ -177,11 +182,6 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
         //如果获取锁成功则启动一个延时线程
         if (locked && needPostpone()) {
             startPostponeThread(expireTime);
-        }
-        if (!locked) {
-            if (logger.isDebugEnabled()) {
-                logger.debug(uniqueStr + "未获取到锁");
-            }
         }
         return Boolean.TRUE;
     }
@@ -205,6 +205,13 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
         return locked;
     }
 
+    /**
+     * 设置锁
+     * @param key
+     * @param value
+     * @param expireTime
+     * @return
+     */
     public Boolean setValueIfAbsent(String key, String value, Long expireTime) {
         Jedis jedis = pool.getResource();
         if (database != null) {
@@ -214,12 +221,6 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
         try {
             result = jedis.eval(REENTRANT_LOCK_SCRIPT, Lists.newArrayList(key), Lists.newArrayList(String.valueOf(expireTime),
                     value));
-//            SetParams params = new SetParams();
-//            params.nx();
-//            if (expireTime != null) {
-//                params.px(expireTime);
-//            }
-//            result = jedis.set(key, value, params);
         } finally {
             jedis.close();
         }
@@ -273,19 +274,12 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
 
     @Override
     public Boolean unlock() {
-//        //通知守护线程关闭
-//        Postpone postpone = postponeMap.get(uniqueStr);
-//        postpone.stopPostPone();
-//        postponeMap.remove(uniqueStr);
-
         Jedis jedis = pool.getResource();
         if (database != null) {
             jedis.select(0);
         }
         Object result;
         try {
-//            result = jedis.eval(RELEASE_LOCK_SCRIPT, Collections.singletonList(LOCK_PREFIX + sourceName),
-//                    Collections.singletonList(uniqueStr));
             result = jedis.eval(REENTRANT_UNLOCK_SCRIPT, Lists.newArrayList(LOCK_PREFIX + sourceName,
                     "redisson_lock__channel:{" + LOCK_PREFIX + sourceName + "}"), Lists.newArrayList(uniqueStr,
                     String.valueOf(DEFAULT_EXPIRED_TIME), uniqueStr));
@@ -295,8 +289,10 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
         if (RELEASE_SUCCESS.equals(result)) {
             //通知守护线程关闭
             Postpone postpone = postponeMap.get(uniqueStr);
-            postpone.stopPostPone();
-            postponeMap.remove(uniqueStr);
+            if (postpone!=null){
+                postpone.stopPostPone();
+                postponeMap.remove(uniqueStr);
+            }
             if (logger.isDebugEnabled()) {
                 logger.debug(uniqueStr + "释放了锁");
             }
@@ -318,9 +314,9 @@ public class RedisDistributedLock implements DistributedLock, LockPostpone {
             jedis.select(0);
         }
         try {
-            Object result = jedis.eval(POSTPONE_LOCK_SCRIPT, Lists.newArrayList(LOCK_PREFIX + sourceName),
-                    Lists.newArrayList(uniqueStr,
-                            String.valueOf(expireTime)));
+            Object result = jedis.eval(POSTPONE_REENTRANT_LOCK_SCRIPT, Lists.newArrayList(LOCK_PREFIX + sourceName),
+                    Lists.newArrayList(String.valueOf(expireTime), uniqueStr
+                    ));
             if (POSTPONE_SUCCESS.equals(result)) {
                 return Boolean.TRUE;
             }
